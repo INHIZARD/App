@@ -1,0 +1,4 @@
+/home/inhizard/Client-server app/build-Server-Desktop-Release/CMakeFiles/Server.dir
+/home/inhizard/Client-server app/build-Server-Desktop-Release/CMakeFiles/edit_cache.dir
+/home/inhizard/Client-server app/build-Server-Desktop-Release/CMakeFiles/rebuild_cache.dir
+/home/inhizard/Client-server app/build-Server-Desktop-Release/CMakeFiles/Server_autogen.dir

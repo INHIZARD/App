@@ -16,9 +16,9 @@ MainWindow::MainWindow(QWidget *parent) :
     socket->connectToHost(QHostAddress::LocalHost,8080);
 
     if(socket->waitForConnected())
-        ui->statusBar->showMessage("Connected to Server");
+        ui->statusBar->showMessage("Соединение с сервером установлено!");
     else{
-        QMessageBox::critical(this,"Client", QString("The following error occurred: %1.").arg(socket->errorString()));
+        QMessageBox::critical(this,"Client", QString("Произошла следующая ошибка: %1.").arg(socket->errorString()));
         exit(EXIT_FAILURE);
     }
 }
@@ -29,8 +29,6 @@ MainWindow::~MainWindow()
     {
         QDataStream socketStream(socket);
         socketStream.setVersion(QDataStream::Qt_5_15);
-        socketStream << QString::fromStdString("Deleted").toUtf8();
-        socketStream << id.toUtf8();
         socket->close();
     }
     delete ui;
@@ -79,7 +77,10 @@ void MainWindow::readSocket()
             refreshComboBox();
         }
         else if (statusBuffer.toStdString() == "New Socket")
+        {
             id = QString::fromStdString(buffer.toStdString());
+            this->setWindowTitle(QString::fromStdString("Client %1").arg(id));
+        }
 
         socketStream >> statusBuffer;
         socketStream >> buffer;
@@ -91,7 +92,7 @@ void MainWindow::discardSocket()
     socket->deleteLater();
     socket=nullptr;
 
-    ui->statusBar->showMessage("Disconnected!");
+    ui->statusBar->showMessage("Соединение потеряно!");
 }
 
 void MainWindow::displayError(QAbstractSocket::SocketError socketError)
@@ -100,13 +101,13 @@ void MainWindow::displayError(QAbstractSocket::SocketError socketError)
         case QAbstractSocket::RemoteHostClosedError:
         break;
         case QAbstractSocket::HostNotFoundError:
-            QMessageBox::information(this, "Client", "The host was not found. Please check the host name and port settings.");
+            QMessageBox::information(this, "Client", "Сервер не найден. Проверьте настройки порта и IP.");
         break;
         case QAbstractSocket::ConnectionRefusedError:
-            QMessageBox::information(this, "Client", "The connection was refused by the peer. Make sure Server is running, and check that the host name and port settings are correct.");
+            QMessageBox::information(this, "Client", "Соединение прервано. Убедитесь запущен ли сервер, и проверьте настройки порта и IP.");
         break;
         default:
-            QMessageBox::information(this, "Client", QString("The following error occurred: %1.").arg(socket->errorString()));
+            QMessageBox::information(this, "Client", QString("Произошла следующая ошибка: %1.").arg(socket->errorString()));
         break;
     }
 }
@@ -132,10 +133,10 @@ void MainWindow::on_pushButton_sendMessage_clicked()
             ui->lineEdit_message->clear();
         }
         else
-            QMessageBox::critical(this,"Client","Socket doesn't seem to be opened");
+            QMessageBox::critical(this,"Client","Сокет не был открыт");
     }
     else
-        QMessageBox::critical(this,"Client","Not connected");
+        QMessageBox::critical(this,"Client","Нет соединения");
 }
 
 void MainWindow::displayMessage(const QString& str)
