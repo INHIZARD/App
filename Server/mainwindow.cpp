@@ -1,5 +1,6 @@
 #include "mainwindow.h"
 #include "ui_mainwindow.h"
+#include <iostream>
 
 MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent), ui(new Ui::MainWindow)
 {
@@ -14,17 +15,17 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent), ui(new Ui::MainWi
     }
     else
     {
-        QMessageBox::critical(this,"QTCPServer",QString("Unable to start the server: %1.").arg(m_server->errorString()));
+        QMessageBox::critical(this,"Server",QString("Unable to start the server: %1.").arg(m_server->errorString()));
         exit(EXIT_FAILURE);
     }
 }
 
 MainWindow::~MainWindow()
 {
-    foreach (QTcpSocket* socket, connection_set)
+    foreach(QPair socket, connection_set)
     {
-        socket->close();
-        socket->deleteLater();
+        socket.first->close();
+        socket.first->deleteLater();
     }
 
     m_server->close();
@@ -41,11 +42,21 @@ void MainWindow::newConnection()
 
 void MainWindow::appendToSocketList(QTcpSocket* socket)
 {
-    connection_set.insert(socket);
     connect(socket, &QTcpSocket::readyRead, this, &MainWindow::readSocket);
     connect(socket, &QTcpSocket::disconnected, this, &MainWindow::discardSocket);
     connect(socket, &QAbstractSocket::errorOccurred, this, &MainWindow::displayError);
-    ui->comboBox_receiver->addItem(QString::number(socket->socketDescriptor()));
+
+    QString id = QString::number(socket->socketDescriptor());
+    sendMessage(socket, "New Socket", id);
+
+    foreach(QPair users_socket, connection_set)
+    {
+        sendMessage(users_socket.first, "New Connect", QString::number(socket->socketDescriptor()));
+        sendMessage(socket, "Old Connect", QString::number(users_socket.first->socketDescriptor()));
+    }
+
+    connection_set.insert(qMakePair(socket, id));
+    ui->comboBox_receiver->addItem(id);
     displayMessage(QString("INFO :: Client with sockd:%1 has just entered the room").arg(socket->socketDescriptor()));
 }
 
@@ -53,60 +64,64 @@ void MainWindow::readSocket()
 {
     QTcpSocket* socket = reinterpret_cast<QTcpSocket*>(sender());
 
-    QByteArray buffer;
+    QByteArray byteArray;
+    QByteArray byteRecipient;
 
     QDataStream socketStream(socket);
     socketStream.setVersion(QDataStream::Qt_5_15);
 
     socketStream.startTransaction();
-    socketStream >> buffer;
 
-    if(!socketStream.commitTransaction())
+    socketStream >> byteRecipient;
+    socketStream >> byteArray;
+    QString receiver = QString::fromStdString(byteRecipient.toStdString());
+
+    while(byteArray != "")
     {
-        QString message = QString("%1 :: Waiting for more data to come..").arg(socket->socketDescriptor());
-        emit newMessage(message);
-        return;
-    }
-
-    QString header = buffer.mid(0,128);
-    QString fileType = header.split(",")[0].split(":")[1];
-
-    buffer = buffer.mid(128);
-
-    if(fileType=="attachment"){
-        QString fileName = header.split(",")[1].split(":")[1];
-        QString ext = fileName.split(".")[1];
-        QString size = header.split(",")[2].split(":")[1].split(";")[0];
-
-        if (QMessageBox::Yes == QMessageBox::question(this, "QTCPServer", QString("You are receiving an attachment from sd:%1 of size: %2 bytes, called %3. Do you want to accept it?").arg(socket->socketDescriptor()).arg(size).arg(fileName)))
+        buffer = QString::fromStdString(byteArray.toStdString());
+        if(receiver=="Broadcast")
         {
-            QString filePath = QFileDialog::getSaveFileName(this, tr("Save File"), QStandardPaths::writableLocation(QStandardPaths::DocumentsLocation)+"/"+fileName, QString("File (*.%1)").arg(ext));
-
-            QFile file(filePath);
-            if(file.open(QIODevice::WriteOnly)){
-                file.write(buffer);
-                QString message = QString("INFO :: Attachment from sd:%1 successfully stored on disk under the path %2").arg(socket->socketDescriptor()).arg(QString(filePath));
-                emit newMessage(message);
-            }else
-                QMessageBox::critical(this,"QTCPServer", "An error occurred while trying to write the attachment.");
-        }else{
-            QString message = QString("INFO :: Attachment from sd:%1 discarded").arg(socket->socketDescriptor());
-            emit newMessage(message);
+            foreach (QPair users_socket,connection_set)
+            {
+                if (socket != users_socket.first)
+                {
+                    sendMessage(users_socket.first, "Message", QString::number(socket->socketDescriptor()));
+                }
+            }
         }
-    }else if(fileType=="message"){
-        QString message = QString("%1 :: %2").arg(socket->socketDescriptor()).arg(QString::fromStdString(buffer.toStdString()));
-        emit newMessage(message);
+        else
+        {
+            foreach (QPair users_socket,connection_set)
+            {
+                if(users_socket.first->socketDescriptor() == receiver.toLongLong())
+                {
+                    sendMessage(users_socket.first, "Message", QString::number(socket->socketDescriptor()));
+                    break;
+                }
+            }
+        }
+        socketStream >> byteArray;
     }
 }
 
 void MainWindow::discardSocket()
 {
     QTcpSocket* socket = reinterpret_cast<QTcpSocket*>(sender());
-    QSet<QTcpSocket*>::iterator it = connection_set.find(socket);
-    if (it != connection_set.end()){
-        displayMessage(QString("INFO :: A client has just left the room").arg(socket->socketDescriptor()));
-        connection_set.remove(*it);
+    QPair<QTcpSocket*, QString> elem = qMakePair(socket, QString::number(socket->socketDescriptor()));
+    foreach(QPair user_socket, connection_set){
+        if (socket == user_socket.first){
+            auto it = connection_set.find(user_socket);
+            buffer = user_socket.second;
+
+            connection_set.remove(*it);
+            break;
+        }
     }
+    displayMessage(QString("INFO :: A client %1 has just left the room").arg(buffer));
+    foreach(QPair user_socket, connection_set){
+        sendMessage(user_socket.first, "Disconnect", buffer);
+    }
+
     refreshComboBox();
 
     socket->deleteLater();
@@ -118,14 +133,14 @@ void MainWindow::displayError(QAbstractSocket::SocketError socketError)
         case QAbstractSocket::RemoteHostClosedError:
         break;
         case QAbstractSocket::HostNotFoundError:
-            QMessageBox::information(this, "QTCPServer", "The host was not found. Please check the host name and port settings.");
+            QMessageBox::information(this, "Server", "The host was not found. Please check the host name and port settings.");
         break;
         case QAbstractSocket::ConnectionRefusedError:
-            QMessageBox::information(this, "QTCPServer", "The connection was refused by the peer. Make sure QTCPServer is running, and check that the host name and port settings are correct.");
+            QMessageBox::information(this, "Server", "The connection was refused by the peer. Make sure Server is running, and check that the host name and port settings are correct.");
         break;
         default:
             QTcpSocket* socket = qobject_cast<QTcpSocket*>(sender());
-            QMessageBox::information(this, "QTCPServer", QString("The following error occurred: %1.").arg(socket->errorString()));
+            QMessageBox::information(this, "Server", QString("The following error occurred: %1.").arg(socket->errorString()));
         break;
     }
 }
@@ -133,21 +148,23 @@ void MainWindow::displayError(QAbstractSocket::SocketError socketError)
 void MainWindow::on_pushButton_sendMessage_clicked()
 {
     QString receiver = ui->comboBox_receiver->currentText();
+    QString status = "Message";
+    buffer = ui->lineEdit_message->text();
 
     if(receiver=="Broadcast")
     {
-        foreach (QTcpSocket* socket,connection_set)
+        foreach (QPair socket,connection_set)
         {
-            sendMessage(socket);
+            sendMessage(socket.first, status, "Server");
         }
     }
     else
     {
-        foreach (QTcpSocket* socket,connection_set)
+        foreach (QPair socket,connection_set)
         {
-            if(socket->socketDescriptor() == receiver.toLongLong())
+            if(socket.first->socketDescriptor() == receiver.toLongLong())
             {
-                sendMessage(socket);
+                sendMessage(socket.first, status, "Server");
                 break;
             }
         }
@@ -155,98 +172,39 @@ void MainWindow::on_pushButton_sendMessage_clicked()
     ui->lineEdit_message->clear();
 }
 
-
-void MainWindow::on_pushButton_sendAttachment_clicked()
-{
-    QString receiver = ui->comboBox_receiver->currentText();
-
-    QString filePath = QFileDialog::getOpenFileName(this, ("Select an attachment"), QStandardPaths::writableLocation(QStandardPaths::DocumentsLocation), ("File (*.json *.txt *.png *.jpg *.jpeg)"));
-
-    if(filePath.isEmpty()){
-        QMessageBox::critical(this,"QTCPClient","You haven't selected any attachment!");
-        return;
-    }
-
-    if(receiver=="Broadcast")
-    {
-        foreach (QTcpSocket* socket,connection_set)
-        {
-            sendAttachment(socket, filePath);
-        }
-    }
-    else
-    {
-        foreach (QTcpSocket* socket,connection_set)
-        {
-            if(socket->socketDescriptor() == receiver.toLongLong())
-            {
-                sendAttachment(socket, filePath);
-                break;
-            }
-        }
-    }
-    ui->lineEdit_message->clear();
-}
-
-void MainWindow::sendMessage(QTcpSocket* socket)
+void MainWindow::sendMessage(QTcpSocket* socket, QString status, QString num_socket)
 {
     if(socket)
     {
         if(socket->isOpen())
         {
-            QString str = ui->lineEdit_message->text();
-
             QDataStream socketStream(socket);
             socketStream.setVersion(QDataStream::Qt_5_15);
 
-            QByteArray header;
-            header.prepend(QString("fileType:message,fileName:null,fileSize:%1;").arg(str.size()).toUtf8());
-            header.resize(128);
+            QByteArray byteStatus = status.toUtf8();
+            QByteArray byteArray = buffer.toUtf8();
+            QByteArray userNum = num_socket.toUtf8();
 
-            QByteArray byteArray = str.toUtf8();
-            byteArray.prepend(header);
-
-            socketStream.setVersion(QDataStream::Qt_5_15);
-            socketStream << byteArray;
-        }
-        else
-            QMessageBox::critical(this,"QTCPServer","Socket doesn't seem to be opened");
-    }
-    else
-        QMessageBox::critical(this,"QTCPServer","Not connected");
-}
-
-void MainWindow::sendAttachment(QTcpSocket* socket, QString filePath)
-{
-    if(socket)
-    {
-        if(socket->isOpen())
-        {
-            QFile m_file(filePath);
-            if(m_file.open(QIODevice::ReadOnly)){
-
-                QFileInfo fileInfo(m_file.fileName());
-                QString fileName(fileInfo.fileName());
-
-                QDataStream socketStream(socket);
-                socketStream.setVersion(QDataStream::Qt_5_15);
-
-                QByteArray header;
-                header.prepend(QString("fileType:attachment,fileName:%1,fileSize:%2;").arg(fileName).arg(m_file.size()).toUtf8());
-                header.resize(128);
-
-                QByteArray byteArray = m_file.readAll();
-                byteArray.prepend(header);
-
+            socketStream << byteStatus;
+            if (status == "New Connect")
+                socketStream << userNum;
+            else if (status == "Message")
+            {
                 socketStream << byteArray;
-            }else
-                QMessageBox::critical(this,"QTCPClient","Couldn't open the attachment!");
+                socketStream << userNum;
+            }
+            else if (status == "Old Connect")
+                socketStream << userNum;
+            else if (status == "Disconnect")
+                socketStream << userNum;
+            else if (status == "New Socket")
+                socketStream << userNum;
         }
         else
-            QMessageBox::critical(this,"QTCPServer","Socket doesn't seem to be opened");
+            QMessageBox::critical(this,"Server","Socket doesn't seem to be opened");
     }
     else
-        QMessageBox::critical(this,"QTCPServer","Not connected");
+        QMessageBox::critical(this,"Server","Not connected");
 }
 
 void MainWindow::displayMessage(const QString& str)
@@ -257,6 +215,6 @@ void MainWindow::displayMessage(const QString& str)
 void MainWindow::refreshComboBox(){
     ui->comboBox_receiver->clear();
     ui->comboBox_receiver->addItem("Broadcast");
-    foreach(QTcpSocket* socket, connection_set)
-        ui->comboBox_receiver->addItem(QString::number(socket->socketDescriptor()));
+    foreach(QPair socket, connection_set)
+        ui->comboBox_receiver->addItem(QString::number(socket.first->socketDescriptor()));
 }

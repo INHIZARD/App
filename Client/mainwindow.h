@@ -33,11 +33,14 @@ private slots:
 
     void displayMessage(const QString& str);
     void on_pushButton_sendMessage_clicked();
-    void on_pushButton_sendAttachment_clicked();
+
+    void refreshComboBox();
 private:
     Ui::MainWindow *ui;
 
     QTcpSocket* socket;
+    QSet<QString> connection_set;
+    QString id;
 };
 
 #endif // MAINWINDOW_H

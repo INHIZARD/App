@@ -36,11 +36,9 @@ private slots:
     void displayError(QAbstractSocket::SocketError socketError);
 
     void displayMessage(const QString& str);
-    void sendMessage(QTcpSocket* socket);
-    void sendAttachment(QTcpSocket* socket, QString filePath);
+    void sendMessage(QTcpSocket* socket, QString status, QString num_socket="-1");
 
     void on_pushButton_sendMessage_clicked();
-    void on_pushButton_sendAttachment_clicked();
 
     void refreshComboBox();
 
@@ -48,7 +46,8 @@ private:
     Ui::MainWindow *ui;
 
     QTcpServer* m_server;
-    QSet<QTcpSocket*> connection_set;
+    QSet<QPair<QTcpSocket*, QString>> connection_set;
+    QString buffer;
 };
 
 #endif // MAINWINDOW_H
